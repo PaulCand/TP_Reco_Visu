@@ -1,0 +1,128 @@
+import numpy as np
+import cv2
+from PIL import Image
+from scipy import ndimage
+import matplotlib.pyplot as plt
+
+covariance_matrix = np.array([[5,0,0],[0,5,0],[0,0,5]])
+
+
+file_path = r"C:\Users\paulcand94\Downloads\video_sequences\video_sequences\synthetic\escrime-4-3.avi"
+
+#Importation of the video
+cap = cv2.VideoCapture(file_path)
+
+#In order to get each frame of the video, define in a function
+def get_proper_frame(cap,frame_number) :
+    
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+    success, frameRGB = cap.read()
+    gray_frame = cv2.cvtColor(frameRGB, cv2.COLOR_BGR2GRAY)
+    frame = gray_frame
+
+    return frame
+
+
+print("Frame_number",cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+#test
+frame = get_proper_frame(cap,50)
+
+#cv2.imshow("title", frame) 
+#print(frame.shape)
+
+#Initialisation in the center
+center_rectangle= frame[220:260,300:340]
+center_gray = frame[240,320]
+center_pos = [240,320,0]
+
+print(center_gray)
+"""
+if success:
+    cv2.imshow("Video Player", center_rectangle)
+"""
+# Compute the histogram
+hist, bin_edges = np.histogram(center_rectangle, bins=128, range=(0, 127))
+"""
+# Plot the histogram
+plt.figure(figsize=(8, 6))
+plt.bar(bin_edges[:-1], hist, width=1, edgecolor='black')
+plt.title("Histogram of Grayscale Image")
+plt.xlabel("Pixel Intensity")
+plt.ylabel("Frequency")
+plt.show()
+"""
+
+#Initialisation of points and weights
+point_list = []
+Number_point = 10
+Weight_initiate_list = [1/Number_point]*Number_point
+
+for i in range(Number_point):
+    noise = np.random.multivariate_normal(np.array([0,0,0]),covariance_matrix)
+    print(noise)
+
+    point_list.append(center_pos + noise)
+
+print(point_list)
+
+def point_square_rotation(frame, center_point_pos):
+    x = center_point_pos[0]
+    y = center_point_pos[1]
+    alpha = np.pi*center_point_pos[2]/180
+
+
+    square_corner_before_rotation = [[x-20,y+20],[x+20,y+20],[x-20,y-20],[x+20,y-20]]
+
+    square_corner_after_rotation = []
+
+    for coordonates in square_corner_before_rotation:
+        
+        square_corner_after_rotation_x = x + (coordonates[0]-x)*np.cos(alpha) - (coordonates[1]-y)*np.sin(alpha)
+        square_corner_after_rotation_y = y + (coordonates[0]-x)*np.sin(alpha) + (coordonates[1]-y)*np.cos(alpha)
+        square_corner_after_rotation.append([square_corner_after_rotation_x, square_corner_after_rotation_y])
+    
+    min_x = min(i[0] for i in square_corner_after_rotation)
+    print('min_x : ',min_x)
+    max_x = max(i[0] for i in square_corner_after_rotation)
+    print('max_x : ',max_x)
+    min_y = min(j[1] for j in square_corner_after_rotation)
+    max_y = max(j[1] for j in square_corner_after_rotation)
+
+    print(square_corner_before_rotation)
+    print(square_corner_after_rotation)
+
+    Big_square_corner = [[min_x,max_y],[max_x,max_y],[min_x,min_y],[max_x,min_y]]
+    
+    big_square_points = [round(min_x):round(max_x),round(min_y):round(max_y)]
+
+    print(big_square_points)
+    
+    #erreur prendre les coté du petit carré
+    def affine(z1,z2):
+        a = (z1[1]-z2[1])/(z1[0]-z2[0])
+        b = z1[1]-a*z1[0]
+
+        return a,b
+        
+    line_north_to_east = affine(square_corner_after_rotation[1],square_corner_after_rotation[2])
+    print(line_north_to_east)
+    
+    for i in range(min_x,max_x+1):
+        for j in range(min_y,max_y+1):
+            
+            if line_north_to_east[0]*x+line_north_to_east[1] :
+                
+    
+
+    return frame[round(min_x):round(max_x),round(min_y):round(max_y)]
+
+
+output = point_square_rotation(get_proper_frame(cap,1), [240, 340, 10])
+print(output.shape)
+        
+        
+    
+#In order to rotate Ex : the matrix cv2.getRotationMatrix2D(center, angle, scale) / cv2.warpPerspective(img, M, (300, 300))
+
+        
