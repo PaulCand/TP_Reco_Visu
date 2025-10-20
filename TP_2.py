@@ -4,11 +4,8 @@ from PIL import Image
 from scipy import ndimage
 import matplotlib.pyplot as plt
 
-
-def get_proper_frame(frameRGB):
-    # In order to get each frame of the video, define in a function
-    gray_frame = cv2.cvtColor(frameRGB, cv2.COLOR_BGR2GRAY)
-    return gray_frame
+def get_gray_frame(frame):
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 def initialise_particles(N,cov_matrix, center_pos):
     #Initialisation of points and weights
@@ -104,22 +101,32 @@ def pixels_in_rotated_square(square_corner_after_rotation, big_square_pixels):
 
     return inside_pixels
 
-def update_weights(frame, particles, weights, hist_ref):
+def define_buffer(particle, width, heigth, frame):
+    x_min = int(max(particle[1] - width, 0))
+    x_max = int(min(particle[1] + width, frame.shape[1]))
+    y_min = int(max(particle[0] - heigth, 0))
+    y_max = int(min(particle[0] + heigth, frame.shape[0]))
+
+    center_rectangle = frame[y_min:y_max, x_min:x_max]
+
+    #Rajouter si on a le temps pour la rotation
+
+    return center_rectangle
+
+
+def update_weights(frame, object_tracked, listparticles, list_weights, hist_ref):
     # Update particle weights based on their similarity to the reference histogram
     lambda_ = 20
-    update_weights = np.zeros(len(particles))
-    for i, particle in enumerate(particles):
-        # bornes avec sécurité
-        x_min = int(max(particle[1] - 20, 0))
-        x_max = int(min(particle[1] + 20, frame.shape[1]))
-        y_min = int(max(particle[0] - 20, 0))
-        y_max = int(min(particle[0] + 20, frame.shape[0]))
+    update_weights = np.zeros(len(listparticles))
+    for i, particle in enumerate(listparticles):
 
-        center_rectangle = frame[y_min:y_max, x_min:x_max]
+        height, width = object_tracked.shape[:2]
 
-        hist, bin_edges = np.histogram(center_rectangle, bins=128, range=(0, 127), density=True)
+        object_buffer = define_buffer(particle, width, height, frame)
+
+        hist, bin_edges = np.histogram(object_buffer, bins=128, range=(0, 127), density=True)
         dist = np.sqrt(1 - np.sum(np.sqrt(hist * hist_ref)))
-        update_weights[i] = np.exp(-lambda_ * dist ** 2)*weights[i]
+        update_weights[i] = np.exp(-lambda_ * dist ** 2)*list_weights[i]
     update_weights /= np.sum(update_weights)  # Normalize weights
     return update_weights
 
@@ -130,21 +137,21 @@ def predict_particles(particles, cov_matrix):
         particles[i] += np.random.multivariate_normal(np.array([0,0,0]),cov_matrix)
     return particles
 
-def estimate_position(particles, weights):
+def estimate_position(list_particles, list_weights):
     # Estimate the object's position (weighted average)
-    return np.average(particles, weights=weights, axis=0)
+    return np.average(list_particles, weights=list_weights, axis=0)
 
-def multinomial_resampling(particles, weights):
+def multinomial_resampling(list_particles, weights):
     # multinomial resampling
-    N = len(particles)
+    N = len(list_particles)
     indices = np.random.choice(N, size=N, replace=True, p=weights)
-    new_particles = particles[indices]
+    new_particles = list_particles[indices]
     new_weights = np.ones(N) / N
 
     return new_particles, new_weights
 
 
-def main_function():
+def main():
     covariance_matrix = np.array([[5, 0, 0], [0, 5, 0], [0, 0, 5]])
 
     file_path = "/Users/antoine/Documents/Cours/3A/TIV/TP2/video sequences/synthetic/escrime-4-3.avi"
@@ -153,7 +160,7 @@ def main_function():
     cap = cv2.VideoCapture(file_path)
     ret, frame = cap.read()
 
-    gray_frame = get_proper_frame(frame)
+    gray_frame = get_gray_frame(frame)
 
     # Initialisation in the center
     center_rectangle = gray_frame[220:260, 300:340]
@@ -165,55 +172,47 @@ def main_function():
     # Compute the histogram
     hist_ref, bin_edges = np.histogram(center_rectangle, bins=128, range=(0, 127), density=True)
 
-    particles, weights = initialise_particles(N, covariance_matrix, center_pos)
+    list_particles, weights = initialise_particles(N, covariance_matrix, center_pos)
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-        gray_frame = get_proper_frame(frame)
+        gray_frame = get_gray_frame(frame)
 
         # Predict new particle positions
-        particles = predict_particles(particles, covariance_matrix)
+        list_particles = predict_particles(list_particles, covariance_matrix)
 
         # Update weights based on histogram similarity
-        weights = update_weights(gray_frame, particles, weights, hist_ref)
+        weights = update_weights(gray_frame, list_particles, weights, hist_ref)
 
         # Resample particles
-        particles, weights = multinomial_resampling(particles, weights)
+        list_particles, weights = multinomial_resampling(list_particles, weights)
 
         # Estimate the new object position
-        estimated_position = estimate_position(particles, weights)
+        estimated_position = estimate_position(list_particles, weights)
 
-        # Display the tracking result
-        half = 20
 
-        # Carré centré en (0,0)
-        corners = np.array([
-            [-half, -half],
-            [half, -half],
-            [half, half],
-            [-half, half]
-        ])
+        center = (estimated_position[1], estimated_position[0])
+        size = (40, 40)
+        angle = np.degrees(estimated_position[2])
 
-        # Matrice de rotation
-        R = np.array([[np.cos(estimated_position[2]), -np.sin(estimated_position[2])],
-                      [np.sin(estimated_position[2]), np.cos(estimated_position[2])]])
+        # Crée le rectangle et récupère ses coins
+        rect = ((center[0], center[1]), size, angle)
+        pts = cv2.boxPoints(rect).astype(int)
 
-        # Rotation puis translation vers (cx, cy)
-        rotated = (corners @ R.T) + np.array([estimated_position[1], estimated_position[0]])
-        pts = rotated.reshape((-1, 1, 2)).astype(int)
+        # Dessine le carré
         cv2.polylines(frame, [pts], isClosed=True, color=(0, 255, 0), thickness=2)
 
         cv2.imshow('Tracking', frame)
-
-        if cv2.waitKey(30) & 0xFF == 27:  # Press "Esc" to exit
+        if cv2.waitKey(30) & 0xFF == 27:  # Esc pour quitter
             break
 
     cap.release()
     cv2.destroyAllWindows()
 
-print(main_function())
+if __name__ == "__main__":
+    main()
 
 
 
